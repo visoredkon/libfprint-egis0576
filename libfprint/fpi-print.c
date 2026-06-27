@@ -243,7 +243,7 @@ fpi_print_bz3_match (FpPrint *print_template,
       gint score;
       gstruct = g_ptr_array_index (print_template->prints, i);
       score = bozorth_to_gallery (probe_len, pstruct, gstruct);
-      fp_dbg ("score %d/%d", score, bz3_threshold);
+      fp_dbg ("score %d/%d (probe: %d, gallery: %d)", score, bz3_threshold, pstruct->nrows, gstruct->nrows);
 
       if (score >= bz3_threshold)
         return FPI_MATCH_SUCCESS;
