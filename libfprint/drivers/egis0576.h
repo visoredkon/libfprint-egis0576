@@ -27,6 +27,9 @@
 /* Device transfers */
 #define EGIS0576_TIMEOUT 10000
 #define EGIS0576_POLL_COUNT 3000
+#define EGIS0576_POLL_MIN_LEN 7
+#define EGIS0576_POLL_STATUS_IDX 6
+#define EGIS0576_POLL_READY_BIT 0x01
 
 /* Sensor image */
 #define EGIS0576_IMG_WIDTH 70
@@ -55,6 +58,14 @@
 #define EGIS0576_VARIANCE (3.2 * 3.2)
 #define EGIS0576_DARK_PORTION 0.05
 #define EGIS0576_BG_VARIANCE (2.5 * 2.5)
+#define EGIS0576_DARK_PORTION_MIN 0.08
+#define EGIS0576_DARK_PORTION_MAX 0.50
+
+#define EGIS0576_IMG_MIN_SUM_AVG 10
+
+#define EGIS0576_DELAY_SHORT_MS 50
+#define EGIS0576_DELAY_MED_MS 100
+#define EGIS0576_DELAY_LONG_MS 500
 
 /*
  *
@@ -94,7 +105,7 @@
 typedef struct
 {
   int            len;
-  unsigned char *cmd;
+  const unsigned char *cmd;
   int            res_len;
 } Egis0576Pkt;
 
