@@ -144,13 +144,12 @@ reset_session (FpDeviceEgis0576 *self)
 {
   self->has_background = FALSE;
   memset (self->background, 0, sizeof (self->background));
-  self->seq_type = SEQ_INIT;
   self->seq_pkt_index = 0;
   self->stop = FALSE;
 }
 
 static void
-subtract_and_autocontrast (guchar *bg, const guchar *img, guchar *out, gdouble *dark_portion)
+subtract_and_autocontrast (const guchar *bg, const guchar *img, guchar *out, gdouble *dark_portion, gdouble *mean_diff)
 {
   const guchar *p_bg = bg;
   const guchar *p_img = img;
@@ -158,6 +157,7 @@ subtract_and_autocontrast (guchar *bg, const guchar *img, guchar *out, gdouble *
   const guchar *p = out;
   const guchar *end = out + EGIS0576_IMG_SIZE;
   guchar *p_out = out;
+  gdouble sum = 0;
   int dark = 0;
 
   while (p_bg < end_bg)
@@ -173,11 +173,13 @@ subtract_and_autocontrast (guchar *bg, const guchar *img, guchar *out, gdouble *
       p_out[0] = (guchar) d1;
       p_out[1] = (guchar) d2;
 
+      sum += d1 + d2;
       p_bg += 2;
       p_img += 2;
       p_out += 2;
     }
 
+  *mean_diff = sum / EGIS0576_IMG_SIZE;
   autocontrast_img (out);
 
   while (p < end)
@@ -190,32 +192,6 @@ subtract_and_autocontrast (guchar *bg, const guchar *img, guchar *out, gdouble *
     }
 
   *dark_portion = (gdouble) dark / EGIS0576_IMG_SIZE;
-}
-
-static gdouble
-mean_abs_diff (const guchar *bg, const guchar *img)
-{
-  const guchar *p_bg = bg;
-  const guchar *p_img = img;
-  const guchar *end_bg = bg + EGIS0576_IMG_SIZE;
-  gdouble sum = 0;
-
-  while (p_bg < end_bg)
-    {
-      int d1 = (int) p_bg[0] - (int) p_img[0];
-      int d2 = (int) p_bg[1] - (int) p_img[1];
-
-      if (d1 < 0)
-        d1 = -d1;
-      if (d2 < 0)
-        d2 = -d2;
-
-      sum += d1 + d2;
-      p_bg += 2;
-      p_img += 2;
-    }
-
-  return sum / EGIS0576_IMG_SIZE;
 }
 
 static int
@@ -260,11 +236,9 @@ count_unique (const guchar *img, int size)
 }
 
 static gboolean
-capture_quality_ok (const guchar *bg, const guchar *img, const guchar *processed, gdouble dark_portion, gdouble *diff)
+capture_quality_ok (const guchar *processed, gdouble dark_portion, gdouble diff)
 {
-  *diff = mean_abs_diff (bg, img);
-
-  if (*diff < EGIS0576_MIN_ABS_DIFF)
+  if (diff < EGIS0576_MIN_ABS_DIFF)
     return FALSE;
   if (dark_portion < EGIS0576_DARK_PORTION_MIN || dark_portion > EGIS0576_DARK_PORTION_MAX)
     return FALSE;
@@ -340,12 +314,9 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
 
   if (variance > EGIS0576_VARIANCE)
     {
-      subtract_and_autocontrast (self->background, img, processed, &dark_portion);
-      finger_present = capture_quality_ok (self->background, img, processed, dark_portion, &mean_abs_diff_val);
+      subtract_and_autocontrast (self->background, img, processed, &dark_portion, &mean_abs_diff_val);
+      finger_present = capture_quality_ok (processed, dark_portion, mean_abs_diff_val);
     }
-
-  fp_dbg ("Finger status (present, variance, dark port, abs diff, state) : %d , %.2f, %.2f, %.2f, %d",
-          finger_present, variance, dark_portion, mean_abs_diff_val, img_state);
 
   if (img_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_OFF)
     {
@@ -362,9 +333,18 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
     {
       if (variance > EGIS0576_VARIANCE && self->has_background)
         {
-          fp_dbg ("Rejecting low-quality capture, recalibrating background");
-          self->has_background = FALSE;
-          fpi_image_device_retry_scan (img_self, FP_DEVICE_RETRY_REMOVE_FINGER);
+          if (img_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_ON)
+            {
+              fp_dbg ("AWAIT_FINGER_ON: quality failed but finger present (variance=%.2f) — retrying silently",
+                      variance);
+            }
+          else
+            {
+              fp_dbg ("Rejecting low-quality capture, recalibrating background (state=%d)",
+                      img_state);
+              self->has_background = FALSE;
+              fpi_image_device_retry_scan (img_self, FP_DEVICE_RETRY_REMOVE_FINGER);
+            }
         }
       else
         {
@@ -401,9 +381,7 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
 
   upscale_and_pad_img (processed, fp_img->data);
 
-  fpi_image_device_report_finger_status (img_self, TRUE);
   fpi_image_device_image_captured (img_self, fp_img);
-  fpi_image_device_report_finger_status (img_self, FALSE);
 
   self->seq_type = SEQ_REPEAT;
   fpi_ssm_next_state_delayed (transfer->ssm, EGIS0576_DELAY_CAPTURE_MS);
@@ -453,7 +431,7 @@ process_image_transfer (FpDevice *dev, FpiUsbTransfer *transfer)
       return;
     }
 
-  // Heuristic: reject near-empty buffers
+  /* Heuristic: reject near-empty buffers */
   guint sum = 0;
   for (gint i = 0; i < buffer_len; i++)
     sum += buffer[i];
@@ -484,7 +462,7 @@ cmd_resp_cb (FpiUsbTransfer *transfer, FpDevice *dev, gpointer user_data, GError
 
   switch (self->seq_type)
     {
-    // Init/Repeat response is echo, no data to process
+    /* Init/Repeat response is echo, no data to process */
     case SEQ_INIT:
     case SEQ_REPEAT:
       fpi_ssm_jump_to_state (transfer->ssm, DEV_REQ);
