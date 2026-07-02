@@ -1,6 +1,6 @@
 if udev_hwdb_dir != ''
     # This file has to be updated using
-    # ninja -C <builddir> libfprint/sync-udev-hwdb
+    # meson compile -C <builddir> sync-udev-hwdb
     # Note that the unsupported device list needs to be manually synced from
     # the wiki. See comment in libfprint/fprint-list-uev-hwdb.c
 
