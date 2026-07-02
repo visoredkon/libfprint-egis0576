@@ -354,18 +354,14 @@ if install_udev_rules
     )
 endif
 
-sync_udev_udb = custom_target('sync-udev-hwdb',
+run_target('sync-udev-hwdb',
     depends: udev_hwdb_generator,
-    output: 'sync-udev-hwdb',
-    install: false,
     command: [
         'cp', '-v',
         udev_hwdb_generator.full_path(),
         meson.project_source_root() / 'data'
     ]
 )
-
-alias_target('sync-udev-hwdb', sync_udev_udb)
 
 run_target('sync-unsupported-devices',
     command: [ sync_unsupported_files, udev_hwdb_list_file ]
