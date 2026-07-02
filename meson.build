@@ -334,6 +334,8 @@ subdir('tests')
 
 subdir('examples')
 
+meson.add_dist_script(sync_unsupported_files, '--check', udev_hwdb_list_file)
+
 pkgconfig = import('pkgconfig')
 pkgconfig.generate(
     name: versioned_libname,

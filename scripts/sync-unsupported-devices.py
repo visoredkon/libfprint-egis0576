@@ -4,6 +4,7 @@
 # fprint-list-udev-hwdb.c from the libfprint wiki page.
 
 import argparse
+import os
 import re
 import sys
 from urllib.request import urlopen
@@ -40,6 +41,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_file", help="Path to hwdb file")
     parser.add_argument("--url", default=DEFAULT_URL, help="Wiki page URL")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not modify files, fail if an update is needed",
+    )
     args = parser.parse_args()
 
     entries = parse_entries(fetch(args.url))
@@ -60,6 +66,10 @@ def main():
     if new_content == content:
         print("allowlist_id_table is already up to date")
         return
+
+    if args.check:
+        print("allowlist_id_table is out of date", file=sys.stderr)
+        sys.exit(1)
 
     with open(args.source_file, "w", encoding="utf-8") as f:
         f.write(new_content)
