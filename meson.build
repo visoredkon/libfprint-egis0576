@@ -11,6 +11,8 @@ project('libfprint', [ 'c', 'cpp' ],
 fs = import('fs')
 gnome = import('gnome')
 
+python3 = find_program('python3')
+
 libfprint_conf = configuration_data()
 libfprint_conf.set_quoted('LIBFPRINT_VERSION', meson.project_version())
 
@@ -100,6 +102,8 @@ mathlib_dep = cc.find_library('m', required: false)
 # The following dependencies are only used for tests
 sh = find_program('sh', required: true)
 cairo_dep = dependency('cairo', required: false)
+
+sync_unsupported_files = files('scripts' / 'sync-unsupported-devices.py')
 
 # introspection scanning and Gio-2.0.gir
 gobject_introspection = dependency('gobject-introspection-1.0', required: get_option('introspection'))
