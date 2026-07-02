@@ -200,8 +200,11 @@ test_unsupported_list:
   extends:
     - .standard_job
   allow_failure: true
+  variables:
+    FPRINT_HWDB_LIST: libfprint/fprint-list-udev-hwdb.c
   script:
-    - tests/hwdb-check-unsupported.py
+    - scripts/sync-unsupported-devices.py $FPRINT_HWDB_LIST
+    - git diff --color=always --exit-code $FPRINT_HWDB_LIST
 
 flatpak:
   stage: flatpak
