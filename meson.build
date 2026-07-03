@@ -109,83 +109,61 @@ have_spi = host_machine.system() == 'linux'
 
 # Drivers
 drivers = get_option('drivers').split(',')
-virtual_drivers = [
-    'virtual_image',
-    'virtual_device',
-    'virtual_device_storage',
-]
 
-default_drivers = [
-    'upektc_img',
-    'vfs5011',
-    'vfs7552',
-    'aes3500',
-    'aes4000',
-    'aes1610',
-    'aes1660',
-    'aes2660',
-    'aes2501',
-    'aes2550',
-    'vfs101',
-    'vfs301',
-    'vfs0050',
-    'etes603',
-    'egis0570',
-    'egis0576',
-    'egismoc',
-    'egis_etu905',
-    'vcom5s',
-    'synaptics',
-    'elan',
-    'elanmoc',
-    'uru4000',
-    'upektc',
-    'upeksonly',
-    'upekts',
-    'goodixmoc',
-    'nb1010',
-    'fpcmoc',
-    'realtek',
-    'focaltech_moc',
-    'mafpmoc',
-    'secugen',
-]
+drivers_info = {
+    'upektc_img': {},
+    'vfs5011': { 'endian_dependent': true },
+    'vfs7552': {},
+    'aes3500': { 'helper': ['aeslib', 'aes3k', 'pixman'] },
+    'aes4000': { 'helper': ['aeslib', 'aes3k', 'pixman'] },
+    'aes1610': { 'helper': ['aeslib'] },
+    'aes1660': { 'helper': ['aeslib', 'aesx660'] },
+    'aes2660': { 'helper': ['aeslib', 'aesx660'] },
+    'aes2501': { 'helper': ['aeslib'] },
+    'aes2550': { 'helper': ['aeslib'] },
+    'vfs101': {},
+    'vfs301': { 'endian_dependent': true },
+    'vfs0050': { 'endian_dependent': true },
+    'etes603': {},
+    'egis0570': {},
+    'egis0576': {},
+    'egismoc': {},
+    'egis_etu905': {},
+    'vcom5s': {},
+    'synaptics': {},
+    'elan': { 'endian_dependent': true },
+    'elanmoc': {},
+    'uru4000': { 'helper': ['openssl'] },
+    'upektc': {},
+    'upeksonly': {},
+    'upekts': {},
+    'goodixmoc': {},
+    'nb1010': {},
+    'fpcmoc': {},
+    'realtek': {},
+    'focaltech_moc': {},
+    'mafpmoc': {},
+    'secugen': {},
 
-spi_drivers = [
-    'elanspi'
-]
+    # SPI driver (non-optional if SPI is available)
+    'elanspi': { 'spi': true, 'helper': ['udev'], 'optional': not have_spi },
 
-if have_spi
-    default_drivers += spi_drivers
-endif
+    # Virtual drivers (test-only, optional)
+    'virtual_image': { 'virtual': true, 'helper': ['virtual'], 'optional': true },
+    'virtual_device': { 'virtual': true, 'helper': ['virtual'], 'optional': true },
+    'virtual_device_storage': { 'virtual': true, 'helper': ['virtual'], 'optional': true },
+}
 
-# FIXME: All the drivers should be fixed by adjusting the byte order.
-# See https://gitlab.freedesktop.org/libfprint/libfprint/-/issues/236
-endian_independent_drivers = virtual_drivers + [
-    'aes1610',
-    'aes1660',
-    'aes2550',
-    'aes2660',
-    'aes3500',
-    'aes4000',
-    'egis0570',
-    'egis0576',
-    'egismoc',
-    'egis_etu905',
-    'elanmoc',
-    'etes603',
-    'focaltech_moc',
-    'nb1010',
-    'realtek',
-    'synaptics',
-    'upeksonly',
-    'upektc',
-    'upektc_img',
-    'upekts',
-    'vcom5s',
-    'vfs101',
-    'vfs7552',
-]
+default_drivers = []
+virtual_drivers = []
+foreach name, info : drivers_info
+    if not info.get('optional', false)
+        default_drivers += name
+    endif
+    if info.get('virtual', false)
+        virtual_drivers += name
+    endif
+endforeach
 
 all_drivers = default_drivers + virtual_drivers
 
@@ -197,36 +175,18 @@ if drivers == [ 'default' ]
     drivers = default_drivers
 endif
 
-enabled_spi_drivers = []
-foreach driver : spi_drivers
-    if driver in drivers
-        enabled_spi_drivers += driver
-    endif
-endforeach
-
-if enabled_spi_drivers.length() > 0 and not have_spi
-    error('SPI drivers @0@ are not supported'.format(enabled_spi_drivers))
+if not have_spi
+    foreach driver: drivers
+        if drivers_info[driver].get('spi', false)
+            error('SPI driver @0@ is not supported'.format(driver))
+        endif
+    endforeach
 endif
-
-driver_helper_mapping = {
-    'aes1610' : [ 'aeslib' ],
-    'aes1660' : [ 'aeslib', 'aesx660' ],
-    'aes2501' : [ 'aeslib' ],
-    'aes2550' : [ 'aeslib' ],
-    'aes2660' : [ 'aeslib', 'aesx660' ],
-    'aes3500' : [ 'aeslib', 'aes3k' ],
-    'aes4000' : [ 'aeslib', 'aes3k' ],
-    'uru4000' : [ 'openssl' ],
-    'elanspi' : [ 'udev' ],
-    'virtual_image'          : [ 'virtual' ],
-    'virtual_device'         : [ 'virtual' ],
-    'virtual_device_storage' : [ 'virtual' ],
-}
 
 driver_helpers = []
 foreach driver : drivers
-    if driver in driver_helper_mapping
-        foreach helper : driver_helper_mapping[driver]
+    if driver in drivers_info
+        foreach helper : drivers_info[driver].get('helper', [])
             if helper not in driver_helpers
                 driver_helpers += helper
             endif
@@ -258,14 +218,14 @@ optional_deps = []
 
 # Resolve extra dependencies
 foreach i : driver_helpers
-    foreach d, helpers : driver_helper_mapping
-        if i in helpers
-            driver = d
+    foreach name, info : drivers_info
+        if i in info.get('helper', [])
+            driver = name
             break
         endif
     endforeach
 
-    if i == 'aes3k'
+    if i == 'pixman'
         imaging_dep = dependency('pixman-1', required: false)
         if not imaging_dep.found()
             error('pixman is required for @0@ and possibly others'.format(driver))
@@ -306,9 +266,11 @@ if install_udev_rules
     endif
 endif
 
+# FIXME: All the drivers should be fixed by adjusting the byte order.
+# See https://gitlab.freedesktop.org/libfprint/libfprint/-/issues/236
 supported_drivers = []
 foreach driver: drivers
-    if build_machine.endian() == 'little' or driver in endian_independent_drivers
+    if build_machine.endian() == 'little' or not drivers_info[driver].get('endian_dependent', false)
         supported_drivers += driver
     else
         warning('Driver @0@ is not supported by big endian cpu @1@. Please, fix it!'.format(

@@ -177,7 +177,7 @@ fp_cmd_receive_cb (FpiUsbTransfer *transfer,
   gx_proto_crc32_calc (transfer->buffer, PACKAGE_HEADER_SIZE + header.len, (uint8_t *) &crc32_calc);
 
   if (!fpi_byte_reader_get_uint32_le (&reader, &crc32) ||
-      crc32_calc != crc32)
+      GUINT32_FROM_LE (crc32_calc) != crc32)
     {
       fpi_ssm_mark_failed (transfer->ssm,
                            fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
@@ -1618,7 +1618,7 @@ gx_fp_template_delete (FpDevice *device)
   gsize user_id_len = 0;
   const guint8 *tid;
   gsize tid_len = 0;
-  gsize payload_len = 0;
+  guint16 payload_len = 0;
   g_autofree guint8 *payload = NULL;
 
   fpi_device_get_delete_data (device, &print);
@@ -1631,7 +1631,8 @@ gx_fp_template_delete (FpDevice *device)
                                   fpi_device_error_new (FP_DEVICE_ERROR_DATA_INVALID));
       return;
     }
-  if (!encode_finger_id (tid, tid_len, user_id, user_id_len, &payload, (guint16 *) &payload_len))
+
+  if (!encode_finger_id (tid, tid_len, user_id, user_id_len, &payload, &payload_len))
     {
       fpi_device_delete_complete (device,
                                   fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,

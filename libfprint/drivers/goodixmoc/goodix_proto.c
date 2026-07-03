@@ -493,8 +493,6 @@ static uint8_t sensor_config[26] = {
 int
 gx_proto_init_sensor_config (pgxfp_sensor_cfg_t pconfig)
 {
-  uint32_t crc32_calc = 0;
-
   if (!pconfig)
     return -1;
   memset (pconfig, 0, sizeof (*pconfig));
@@ -503,9 +501,7 @@ gx_proto_init_sensor_config (pgxfp_sensor_cfg_t pconfig)
   memcpy (&pconfig->config, sensor_config, G_N_ELEMENTS (sensor_config));
   pconfig->reserved[0] = 1;
 
-  gx_proto_crc32_calc ((uint8_t *) pconfig, sizeof (*pconfig) - PACKAGE_CRC_SIZE, (uint8_t *) &crc32_calc);
-
-  memcpy (pconfig->crc_value, &crc32_calc, PACKAGE_CRC_SIZE);
+  gx_proto_crc32_calc ((uint8_t *) pconfig, sizeof (*pconfig) - PACKAGE_CRC_SIZE, pconfig->crc_value);
 
   return 0;
 }

@@ -146,7 +146,7 @@ elan_save_frame (FpiDeviceElan *self, unsigned short *frame)
           raw_idx = frame_margin + y + x * raw_height;
         frame_idx = x + y * frame_width;
         frame[frame_idx] =
-          ((unsigned short *) self->last_read)[raw_idx];
+          GUINT16_FROM_LE (((unsigned short *) self->last_read)[raw_idx]);
       }
 }
 

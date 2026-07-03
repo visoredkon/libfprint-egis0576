@@ -587,7 +587,10 @@ image_transfer_cb (FpiUsbTransfer *transfer, FpDevice *dev,
     }
   else
     {
-      self->img_data = g_memdup2 (transfer->buffer, sizeof (struct uru4k_image));
+      struct uru4k_image *img = g_memdup2 (transfer->buffer, sizeof (struct uru4k_image));
+
+      img->num_lines = GUINT16_FROM_LE (img->num_lines);
+      self->img_data = g_steal_pointer (&img);
       self->img_data_actual_length = transfer->actual_length;
       fpi_ssm_next_state (ssm);
     }

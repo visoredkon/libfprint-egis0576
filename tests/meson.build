@@ -34,12 +34,12 @@ installed_tests_testdir = datadir / 'installed-tests' / versioned_libname
 installed_tests_libdir = libdir
 
 drivers_tests = {
-    'aes2501': {},
+    'aes2501': { 'timeout': 20 },
     'aes3500': {},
     'elan': {},
     'elan-cobo': {},
     'elanmoc': {},
-    'elanspi': {},
+    'elanspi': { 'timeout': 30 },
     'synaptics': {},
     'upektc_img': {},
     'upektc_img-tcs1s': {},

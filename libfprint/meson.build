@@ -1,7 +1,7 @@
 spi_sources = []
 spi_headers = []
 
-if enabled_spi_drivers.length() > 0
+if have_spi
   spi_headers = ['fpi-spi-transfer.h']
   spi_sources = ['fpi-spi-transfer.c']
 endif
@@ -147,6 +147,7 @@ helper_sources = {
     'aesx660': files('drivers/aesx660.c'),
     'aes3k': files('drivers/aes3k.c'),
     'openssl': files(),
+    'pixman': files(),
     'udev': files(),
     'virtual': files('drivers/virtual-device-listener.c'),
 }

@@ -27,6 +27,8 @@
     meson
     openssl-devel
     pixman-devel
+    podman
+    qemu-user-static
     python3-cairo
     python3-gobject
     systemd
