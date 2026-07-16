@@ -47,6 +47,7 @@ struct _FpDeviceEgis0576
   gboolean      stop;
 
   gboolean      has_background;
+  int           bg_fail_count;
   guchar        background[EGIS0576_IMG_SIZE];
 
   seq_types     seq_type;
@@ -102,13 +103,14 @@ autocontrast_img (guchar *img)
 {
   const guchar *p = img;
   const guchar *end = img + EGIS0576_IMG_SIZE;
+  const guchar *end_even = img + (EGIS0576_IMG_SIZE & ~1);
   guchar *p_out = img;
   gdouble scale;
   int min = EGIS0576_MAX_PIXEL_VAL;
   int max = 0;
   int range;
 
-  while (p < end)
+  while (p < end_even)
     {
       guchar val1 = p[0];
       guchar val2 = p[1];
@@ -125,24 +127,38 @@ autocontrast_img (guchar *img)
         max = val2;
     }
 
+  if (p < end)
+    {
+      guchar val = p[0];
+
+      if (val < min)
+        min = val;
+      if (val > max)
+        max = val;
+    }
+
   range = max - min;
   if (range < 1)
     range = 1;
 
   scale = (gdouble) EGIS0576_MAX_PIXEL_VAL / range;
 
-  while (p_out < end)
+  while (p_out < end_even)
     {
       p_out[0] = (guchar) ((p_out[0] - min) * scale);
       p_out[1] = (guchar) ((p_out[1] - min) * scale);
       p_out += 2;
     }
+
+  if (p_out < end)
+    p_out[0] = (guchar) ((p_out[0] - min) * scale);
 }
 
 static void
 reset_session (FpDeviceEgis0576 *self)
 {
   self->has_background = FALSE;
+  self->bg_fail_count = 0;
   memset (self->background, 0, sizeof (self->background));
   self->seq_pkt_index = 0;
   self->stop = FALSE;
@@ -249,9 +265,8 @@ capture_quality_ok (const guchar *processed, gdouble dark_portion, gdouble diff)
 }
 
 static gboolean
-bg_is_valid (const guchar *bg)
+bg_is_valid (const guchar *bg, gdouble variance)
 {
-  gint variance = fpi_std_sq_dev (bg, EGIS0576_IMG_SIZE);
   int unique = count_unique (bg, EGIS0576_IMG_SIZE);
 
   return variance >= EGIS0576_MIN_BG_VARIANCE && unique >= EGIS0576_MIN_BG_UNIQ;
@@ -266,7 +281,7 @@ capture_background (FpDevice *dev, FpiUsbTransfer *transfer, gdouble variance)
 
   if (variance < EGIS0576_BG_VARIANCE)
     {
-      if (!bg_is_valid (img))
+      if (!bg_is_valid (img, variance))
         {
           fp_dbg ("Rejecting flat/invalid background frame (variance %.2f)", variance);
           self->seq_type = SEQ_REPEAT;
@@ -321,7 +336,10 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
   if (img_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_OFF)
     {
       if (variance < EGIS0576_BG_VARIANCE)
-        fpi_image_device_report_finger_status (img_self, FALSE);
+        {
+          self->bg_fail_count = 0;
+          fpi_image_device_report_finger_status (img_self, FALSE);
+        }
 
       self->seq_type = SEQ_POLL;
       self->seq_pkt_index = 0;
@@ -335,15 +353,24 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
         {
           if (img_state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_ON)
             {
-              fp_dbg ("AWAIT_FINGER_ON: quality failed but finger present (variance=%.2f) — retrying silently",
-                      variance);
+              fp_dbg ("AWAIT_FINGER_ON: quality failed (variance=%.2f), retrying", variance);
             }
           else
             {
-              fp_dbg ("Rejecting low-quality capture, recalibrating background (state=%d)",
-                      img_state);
-              self->has_background = FALSE;
-              fpi_image_device_retry_scan (img_self, FP_DEVICE_RETRY_REMOVE_FINGER);
+              self->bg_fail_count++;
+              if (self->bg_fail_count >= EGIS0576_BG_FAIL_MAX)
+                {
+                  fp_dbg ("Quality failed %d times, recalibrating background (state=%d)",
+                          self->bg_fail_count, img_state);
+                  self->bg_fail_count = 0;
+                  self->has_background = FALSE;
+                  fpi_image_device_retry_scan (img_self, FP_DEVICE_RETRY_REMOVE_FINGER);
+                }
+              else
+                {
+                  fp_dbg ("Quality failed (%d/%d), retrying (state=%d)",
+                          self->bg_fail_count, EGIS0576_BG_FAIL_MAX, img_state);
+                }
             }
         }
       else
@@ -379,6 +406,7 @@ process_finger (FpDevice *dev, FpiUsbTransfer *transfer)
       return;
     }
 
+  self->bg_fail_count = 0;
   upscale_and_pad_img (processed, fp_img->data);
 
   fpi_image_device_image_captured (img_self, fp_img);
@@ -709,7 +737,7 @@ fpi_device_egis0576_class_init (FpDeviceEgis0576Class *klass)
   dev_class->type = FP_DEVICE_TYPE_USB;
   dev_class->id_table = id_table;
   dev_class->scan_type = FP_SCAN_TYPE_PRESS;
-  dev_class->nr_enroll_stages = 40;
+  dev_class->nr_enroll_stages = 20;
   dev_class->temp_hot_seconds = -1;
 
   img_class->img_open = dev_init;
@@ -720,5 +748,5 @@ fpi_device_egis0576_class_init (FpDeviceEgis0576Class *klass)
   img_class->img_width = EGIS0576_CANVAS_WIDTH;
   img_class->img_height = EGIS0576_CANVAS_HEIGHT;
 
-  img_class->bz3_threshold = 5;
+  img_class->bz3_threshold = 3;
 }
