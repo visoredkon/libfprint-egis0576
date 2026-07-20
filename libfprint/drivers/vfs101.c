@@ -184,8 +184,8 @@ async_send_cb (FpiUsbTransfer *transfer, FpDevice *device,
         }
       else
         {
-          g_error_free (error);
           fp_dbg ("Ignoring send error: %s", error->message);
+          g_error_free (error);
         }
     }
   /* Reset ignore_error flag */
@@ -707,6 +707,9 @@ vfs_check_contrast (FpDeviceVfs101 *vdev)
 {
   int y;
   long int count = 0;
+
+  if (vdev->height <= 0)
+    return;
 
   /* Check difference from byte 4 to byte 5 for verify contrast of image */
   for (y = 0; y < vdev->height; y++)

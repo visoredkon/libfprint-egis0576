@@ -61,7 +61,7 @@ parse_print_data (GVariant      *data,
 
   *user_id = g_variant_get_fixed_array (user_id_var, user_id_len, 1);
 
-  if (*user_id_len <= 0 || *user_id_len > DEFAULT_UID_LEN)
+  if (*user_id_len == 0 || *user_id_len > DEFAULT_UID_LEN)
     return FALSE;
 
   if (*user_id[0] == '\0' || *user_id[0] == ' ')
@@ -234,6 +234,16 @@ fp_accept_sample_cb (FpiDeviceRealtek *self,
             }
           return;
         }
+
+      if (in_status != FP_RTK_SUCCESS)
+        {
+          fpi_ssm_mark_failed (self->task_ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_INVALID,
+                                                         "Enrollment failed (status 0x%02x)",
+                                                         in_status));
+          return;
+        }
+
       fpi_ssm_next_state (self->task_ssm);
     }
 }
@@ -638,6 +648,14 @@ fp_cmd_receive_cb (FpiUsbTransfer *transfer,
     {
       g_autofree guchar *read_buf = NULL;
 
+      if ((gsize) transfer->actual_length < self->trans_data_len)
+        {
+          fpi_ssm_mark_failed (transfer->ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                         "Truncated data received"));
+          return;
+        }
+
       read_buf = g_malloc0 (sizeof (guchar) * (self->trans_data_len));
       memcpy (read_buf, transfer->buffer, self->trans_data_len);
       self->read_data = g_steal_pointer (&read_buf);
@@ -970,7 +988,13 @@ fp_verify_sm_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case FP_RTK_VERIFY_GET_TEMPLATE:
-      g_assert (self->template_num > 0);
+      if (self->template_num <= 0)
+        {
+          fpi_ssm_mark_failed (ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                         "No templates enrolled"));
+          break;
+        }
 
       co_get_template.data_len[0] = GET_LEN_L (self->template_len * self->template_num);
       co_get_template.data_len[1] = GET_LEN_H (self->template_len * self->template_num);
@@ -1032,7 +1056,13 @@ fp_enroll_sm_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case FP_RTK_ENROLL_GET_TEMPLATE:
-      g_assert (self->template_num > 0);
+      if (self->template_num <= 0)
+        {
+          fpi_ssm_mark_failed (ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                         "No templates enrolled"));
+          break;
+        }
 
       co_get_template.data_len[0] = GET_LEN_L (self->template_len * self->template_num);
       co_get_template.data_len[1] = GET_LEN_H (self->template_len * self->template_num);
@@ -1152,7 +1182,13 @@ fp_delete_sm_run_state (FpiSsm *ssm, FpDevice *device)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case FP_RTK_DELETE_GET_POS:
-      g_assert (self->template_num > 0);
+      if (self->template_num <= 0)
+        {
+          fpi_ssm_mark_failed (ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                         "No templates enrolled"));
+          break;
+        }
 
       co_get_template.data_len[0] = GET_LEN_L (self->template_len * self->template_num);
       co_get_template.data_len[1] = GET_LEN_H (self->template_len * self->template_num);
@@ -1344,7 +1380,21 @@ list_print (FpDevice *device)
   guint8 *cmd_buf = NULL;
 
   G_DEBUG_HERE ();
-  g_assert (self->template_num > 0);
+
+  if (self->template_num < 0)
+    {
+      fpi_device_list_complete (device, NULL,
+                                fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                          "Get template number failed!"));
+      return;
+    }
+
+  if (self->template_num == 0)
+    {
+      g_autoptr(GPtrArray) list_result = g_ptr_array_new_with_free_func (g_object_unref);
+      fpi_device_list_complete (device, g_steal_pointer (&list_result), NULL);
+      return;
+    }
 
   co_get_template.data_len[0] = GET_LEN_L (self->template_len * self->template_num);
   co_get_template.data_len[1] = GET_LEN_H (self->template_len * self->template_num);

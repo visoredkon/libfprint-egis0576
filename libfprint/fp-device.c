@@ -221,7 +221,7 @@ fp_device_finalize (GObject *object)
 
   g_clear_pointer (&priv->temp_timeout, g_source_destroy);
 
-  g_slist_free_full (priv->sources, (GDestroyNotify) g_source_destroy);
+  g_clear_slist (&priv->sources, (GDestroyNotify) g_source_destroy);
 
   g_clear_pointer (&priv->current_idle_cancel_source, g_source_destroy);
   g_clear_pointer (&priv->current_task_idle_return_source, g_source_destroy);
@@ -1246,6 +1246,33 @@ match_data_free (FpMatchData *data)
   g_free (data);
 }
 
+static void
+on_verify_identification (GObject      *source_object,
+                          GAsyncResult *result,
+                          gpointer      user_data)
+{
+  g_autoptr(FpPrint) match = NULL;
+  g_autoptr(FpPrint) print = NULL;
+  g_autoptr(GError) error = NULL;
+  g_autoptr(GTask) verify_task = G_TASK (g_steal_pointer (&user_data));
+  FpDevice *device = FP_DEVICE (source_object);
+  FpMatchData *match_data;
+
+  if (!fp_device_identify_finish (device, result, &match, &print, &error))
+    {
+      g_task_return_error (verify_task, g_steal_pointer (&error));
+      return;
+    }
+
+  match_data = g_new0 (FpMatchData, 1);
+  match_data->print = g_steal_pointer (&print);
+
+  g_task_set_task_data (verify_task, g_steal_pointer (&match_data),
+                        (GDestroyNotify) match_data_free);
+
+  g_task_return_int (verify_task, match ? FPI_MATCH_SUCCESS : FPI_MATCH_FAIL);
+}
+
 /**
  * fp_device_verify:
  * @device: a #FpDevice
@@ -1294,11 +1321,27 @@ fp_device_verify (FpDevice           *device,
       return;
     }
 
-  if (!cls->verify || !(priv->features & FP_DEVICE_FEATURE_VERIFY))
+  if ((!cls->verify && !cls->identify) ||
+      !(priv->features & FP_DEVICE_FEATURE_VERIFY))
     {
       g_task_return_error (task,
                            fpi_device_error_new_msg (FP_DEVICE_ERROR_NOT_SUPPORTED,
                                                      "Device has no verification support"));
+      return;
+    }
+
+  if (!cls->verify)
+    {
+      g_autoptr(GPtrArray) prints = NULL;
+
+      g_assert (cls->identify);
+
+      prints = g_ptr_array_sized_new (1);
+      g_ptr_array_add (prints, enrolled_print);
+
+      fp_device_identify (device, prints, cancellable, match_cb, match_data,
+                          match_destroy, on_verify_identification,
+                          g_steal_pointer (&task));
       return;
     }
 
@@ -1401,7 +1444,6 @@ fp_device_identify (FpDevice           *device,
   FpDevicePrivate *priv = fp_device_get_instance_private (device);
   FpDeviceClass *cls = FP_DEVICE_GET_CLASS (device);
   FpMatchData *data;
-  int i;
 
   task = g_task_new (device, cancellable, callback, user_data);
   if (g_task_return_error_if_cancelled (task))
@@ -1454,9 +1496,9 @@ fp_device_identify (FpDevice           *device,
    * a reference to each print. Also, the caller could in principle modify the
    * GPtrArray afterwards.
    */
-  data->gallery = g_ptr_array_new_full (prints->len, g_object_unref);
-  for (i = 0; i < prints->len; i++)
-    g_ptr_array_add (data->gallery, g_object_ref (g_ptr_array_index (prints, i)));
+  data->gallery = g_ptr_array_copy (prints, (GCopyFunc) g_object_ref, NULL);
+  g_ptr_array_set_free_func (data->gallery, g_object_unref);
+
   data->match_cb = match_cb;
   data->match_data = match_data;
   data->match_destroy = match_destroy;

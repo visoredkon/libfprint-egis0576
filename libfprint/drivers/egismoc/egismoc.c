@@ -122,6 +122,9 @@ egismoc_validate_response_prefix (const guchar *buffer_in,
                                   const guchar *valid_prefix,
                                   const gsize   valid_prefix_len)
 {
+  if (buffer_in_len < egismoc_read_prefix_len + EGISMOC_CHECK_BYTES_LENGTH + valid_prefix_len)
+    return FALSE;
+
   const gboolean result = memcmp (buffer_in +
                                   (egismoc_read_prefix_len +
                                    EGISMOC_CHECK_BYTES_LENGTH),
@@ -138,6 +141,9 @@ egismoc_validate_response_suffix (const guchar *buffer_in,
                                   const guchar *valid_suffix,
                                   const gsize   valid_suffix_len)
 {
+  if (buffer_in_len < valid_suffix_len)
+    return FALSE;
+
   const gboolean result = memcmp (buffer_in + (buffer_in_len - valid_suffix_len),
                                   valid_suffix,
                                   valid_suffix_len) == 0;
@@ -889,7 +895,7 @@ egismoc_enroll_check_cb (FpDevice *device,
 /*
  * Builds the full "check" payload which includes identifiers for all
  * fingerprints which currently should exist on the storage. This payload is
- * used during both enrollment and verify actions.
+ * used during both enrollment and identify actions.
  */
 static guchar *
 egismoc_get_check_cmd (FpDevice *device,
@@ -1157,7 +1163,6 @@ egismoc_identify_check_cb (FpDevice *device,
   FpiDeviceEgisMoc *self = FPI_DEVICE_EGISMOC (device);
   gchar device_print_id[EGISMOC_FINGERPRINT_DATA_SIZE];
   FpPrint *print = NULL;
-  FpPrint *verify_print = NULL;
   GPtrArray *prints;
   gboolean found = FALSE;
   guint index;
@@ -1178,6 +1183,14 @@ egismoc_identify_check_cb (FpDevice *device,
          On success, there is a 32 byte array of "something"(?) in chars 14-45
          and then the 32 byte array ID of the matched print comes as chars 46-77
        */
+      if (length_in < EGISMOC_IDENTIFY_RESPONSE_PRINT_ID_OFFSET + EGISMOC_FINGERPRINT_DATA_SIZE)
+        {
+          fpi_ssm_mark_failed (self->task_ssm,
+                               fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                         "Identify response too short"));
+          return;
+        }
+
       memcpy (device_print_id,
               buffer_in + EGISMOC_IDENTIFY_RESPONSE_PRINT_ID_OFFSET,
               EGISMOC_FINGERPRINT_DATA_SIZE);
@@ -1199,29 +1212,16 @@ egismoc_identify_check_cb (FpDevice *device,
 
       fp_info ("Identify successful for: %s", fp_print_get_description (print));
 
-      if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY)
-        {
-          fpi_device_get_identify_data (device, &prints);
-          found = g_ptr_array_find_with_equal_func (prints,
-                                                    print,
-                                                    (GEqualFunc) fp_print_equal,
-                                                    &index);
+      fpi_device_get_identify_data (device, &prints);
+      found = g_ptr_array_find_with_equal_func (prints,
+                                                print,
+                                                (GEqualFunc) fp_print_equal,
+                                                &index);
 
-          if (found)
-            fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
-          else
-            fpi_device_identify_report (device, NULL, print, NULL);
-        }
+      if (found)
+        fpi_device_identify_report (device, g_ptr_array_index (prints, index), print, NULL);
       else
-        {
-          fpi_device_get_verify_data (device, &verify_print);
-          fp_info ("Verifying against: %s", fp_print_get_description (verify_print));
-
-          if (fp_print_equal (verify_print, print))
-            fpi_device_verify_report (device, FPI_MATCH_SUCCESS, print, NULL);
-          else
-            fpi_device_verify_report (device, FPI_MATCH_FAIL, print, NULL);
-        }
+        fpi_device_identify_report (device, NULL, print, NULL);
     }
   /* If device was successfully read but it was a "not matched" */
   else if (egismoc_validate_response_suffix (buffer_in,
@@ -1231,10 +1231,7 @@ egismoc_identify_check_cb (FpDevice *device,
     {
       fp_info ("Print was not identified by the device");
 
-      if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_VERIFY)
-        fpi_device_verify_report (device, FPI_MATCH_FAIL, NULL, NULL);
-      else
-        fpi_device_identify_report (device, NULL, NULL, NULL);
+      fpi_device_identify_report (device, NULL, NULL, NULL);
     }
   else
     {
@@ -1306,17 +1303,14 @@ egismoc_identify_run_state (FpiSsm   *ssm,
     /*
      * In Windows, the driver seems at this point to then immediately take
      * another read from the sensor; this is suspected to be an on-chip
-     * "verify". However, because the user's finger is still on the sensor from
+     * "identify". However, because the user's finger is still on the sensor from
      * the identify, then it seems to always return positive. We will consider
      * this extra step unnecessary and just skip it in this driver. This driver
      * will instead handle matching of the FpPrint from the gallery in the
-     * "verify" case of the callback egismoc_identify_check_cb.
+     * callback egismoc_identify_check_cb.
      */
     case IDENTIFY_COMPLETE:
-      if (fpi_device_get_current_action (device) == FPI_DEVICE_ACTION_IDENTIFY)
-        fpi_device_identify_complete (device, NULL);
-      else
-        fpi_device_verify_complete (device, NULL);
+      fpi_device_identify_complete (device, NULL);
 
       fpi_ssm_mark_completed (ssm);
       break;
@@ -1324,9 +1318,9 @@ egismoc_identify_run_state (FpiSsm   *ssm,
 }
 
 static void
-egismoc_identify_verify (FpDevice *device)
+egismoc_identify (FpDevice *device)
 {
-  fp_dbg ("Identify or Verify");
+  fp_dbg ("Identify");
   FpiDeviceEgisMoc *self = FPI_DEVICE_EGISMOC (device);
 
   g_assert (self->task_ssm == NULL);
@@ -1373,6 +1367,15 @@ egismoc_fw_version_cb (FpDevice *device,
    * all but the last 2 bytes as the FW Version
    */
   prefix_length = egismoc_read_prefix_len + 2 + 3 + 1;
+
+  if (length_in < prefix_length + rsp_fw_version_suffix_len)
+    {
+      fpi_ssm_mark_failed (self->task_ssm,
+                           fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
+                                                     "Firmware version response too short"));
+      return;
+    }
+
   fw_version_start = buffer_in + prefix_length;
   fw_version_length = length_in - prefix_length - rsp_fw_version_suffix_len;
   fw_version = g_strndup ((gchar *) fw_version_start, fw_version_length);
@@ -1619,8 +1622,7 @@ fpi_device_egismoc_class_init (FpiDeviceEgisMocClass *klass)
   dev_class->cancel = egismoc_cancel;
   dev_class->suspend = egismoc_suspend;
   dev_class->close = egismoc_close;
-  dev_class->identify = egismoc_identify_verify;
-  dev_class->verify = egismoc_identify_verify;
+  dev_class->identify = egismoc_identify;
   dev_class->enroll = egismoc_enroll;
   dev_class->delete = egismoc_delete;
   dev_class->clear_storage = egismoc_clear_storage;

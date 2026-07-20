@@ -253,8 +253,6 @@ gx_proto_parse_header (FpiByteReader *reader,
   if (!fpi_byte_reader_get_uint8 (reader, &pheader->rev_crc8))
     g_return_val_if_reached (-1);
 
-  pheader->len -= PACKAGE_CRC_SIZE;
-
   return 0;
 }
 
@@ -263,7 +261,6 @@ gx_proto_parse_fingerid (FpiByteReader     *reader,
                          ptemplate_format_t template)
 {
   uint8_t byte;
-  const uint8_t *buffer;
 
   if (!template)
     return -1;
@@ -280,23 +277,24 @@ gx_proto_parse_fingerid (FpiByteReader     *reader,
   if (!fpi_byte_reader_skip (reader, 1))
     g_return_val_if_reached (-1);
 
-  if (!fpi_byte_reader_get_data (reader, sizeof (template->accountid), &buffer))
+  if (!fpi_byte_reader_get_data_static (reader, template->accountid))
     g_return_val_if_reached (-1);
 
-  memcpy (template->accountid, buffer, sizeof (template->accountid));
-
-  if (!fpi_byte_reader_get_data (reader, sizeof (template->tid), &buffer))
+  if (!fpi_byte_reader_get_data_static (reader, template->tid))
     g_return_val_if_reached (-1);
-
-  memcpy (template->tid, buffer, sizeof (template->tid));
 
   if (!fpi_byte_reader_get_uint8 (reader, &template->payload.size))
     g_return_val_if_reached (-1);
 
-  if (!fpi_byte_reader_get_data (reader, template->payload.size, &buffer))
-    g_return_val_if_reached (-1);
+  if (template->payload.size > sizeof (template->payload.data))
+    {
+      g_warning ("Device reported oversized payload (%d)", template->payload.size);
+      return -1;
+    }
 
-  memcpy (template->payload.data, buffer, template->payload.size);
+  if (!(fpi_byte_reader_get_data_static) (reader, template->payload.size,
+                                          template->payload.data))
+    g_return_val_if_reached (-1);
 
   return 0;
 }
@@ -412,6 +410,13 @@ gx_proto_parse_body (uint16_t cmd, FpiByteReader *byte_reader, pgxfp_cmd_respons
       if (!fpi_byte_reader_get_uint8 (byte_reader,
                                       &presp->finger_list_resp.finger_num))
         g_return_val_if_reached (-1);
+
+      if (presp->finger_list_resp.finger_num > FP_MAX_FINGERNUM)
+        {
+          g_warning ("Device reported too many fingers (%d)",
+                     presp->finger_list_resp.finger_num);
+          return -1;
+        }
 
       for(uint8_t num = 0; num < presp->finger_list_resp.finger_num; num++)
         {

@@ -251,7 +251,12 @@ elan_process_frame_linear (unsigned short *raw_frame,
         max = raw_frame[i];
     }
 
-  g_assert (max != min);
+  if (max == min)
+    {
+      memset (frame->data, 0, frame_size);
+      *frames = g_slist_prepend (*frames, frame);
+      g_return_if_reached ();
+    }
 
   unsigned short px;
 
@@ -286,6 +291,11 @@ elan_process_frame_thirds (unsigned short *raw_frame,
   lvl2 = sorted[frame_size * 65 / 100];
   lvl3 = sorted[frame_size - 1];
   g_free (sorted);
+
+  /* Ensure levels are strictly monotonic to prevent division by zero */
+  lvl1 = MAX (lvl1, lvl0 + 1);
+  lvl2 = MAX (lvl2, lvl1 + 1);
+  lvl3 = MAX (lvl3, lvl2 + 1);
 
   unsigned short px;
 

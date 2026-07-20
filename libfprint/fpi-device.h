@@ -107,7 +107,8 @@ struct _FpIdEntry
  *   guaranteed to only happen when the device is open (this includes delete).
  * @close: Close the device again
  * @enroll: Start an enroll operation
- * @verify: Start a verify operation
+ * @verify: Start a verify operation (it will be implemented via @identify
+ *   if not overriden).
  * @identify: Start an identify operation
  * @capture: Start a capture operation
  * @list: List prints stored on the device
@@ -228,7 +229,6 @@ GUsbDevice  *fpi_device_get_usb_device (FpDevice *device);
 const gchar *fpi_device_get_virtual_env (FpDevice *device);
 gpointer     fpi_device_get_udev_data (FpDevice                 *device,
                                        FpiDeviceUdevSubtypeFlags subtype);
-//const gchar *fpi_device_get_spi_dev (FpDevice *device);
 
 
 FpiDeviceAction fpi_device_get_current_action (FpDevice *device);
