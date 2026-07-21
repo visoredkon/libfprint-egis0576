@@ -95,7 +95,10 @@ finger_det_data_cb (FpiUsbTransfer *transfer, FpDevice *device,
 
   if (error)
     {
-      fpi_image_device_session_error (FP_IMAGE_DEVICE (device), error);
+      /* Ensure deactivation completes even though the finger-detect
+       * loop is broken by the session error. */
+      fpi_image_device_session_error (dev, error);
+      complete_deactivation (dev);
       return;
     }
 
@@ -125,7 +128,10 @@ finger_det_reqs_cb (FpiUsbTransfer *t, FpDevice *device,
 
   if (error)
     {
+      /* Ensure deactivation completes even though the finger-detect
+       * loop is broken by the session error. */
       fpi_image_device_session_error (dev, error);
+      complete_deactivation (dev);
       return;
     }
 
@@ -371,7 +377,12 @@ capture_sm_complete (FpiSsm *ssm, FpDevice *_dev, GError *error)
     }
   else if (error)
     {
+      /* fpi_image_device_session_error() will trigger dev_deactivate()
+       * which sets the deactivating flag. Since the SSM is terminating,
+       * complete_deactivation() must be called here to avoid a deadlock
+       * where nothing checks the deactivating flag. */
       fpi_image_device_session_error (dev, error);
+      complete_deactivation (dev);
     }
   else
     {
