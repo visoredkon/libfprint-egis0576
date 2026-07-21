@@ -245,13 +245,19 @@ capture_set_idle_reqs_cb (FpiUsbTransfer *transfer,
       /* marking machine complete will re-trigger finger detection loop */
       fpi_ssm_mark_completed (transfer->ssm);
     }
+  else if (!error)
+    {
+      /* No image frames were captured (e.g. user tapped without swiping).
+       * Such case is quite easy to happen, since Super RSR is enabled and
+       * thus "Slices with 0-3 pixels of Y motion are discarded" according
+       * to the design specification manual. */
+      fpi_image_device_retry_scan (dev, FP_DEVICE_RETRY_TOO_SHORT);
+      fpi_image_device_report_finger_status (dev, FALSE);
+      fpi_ssm_mark_completed (transfer->ssm);
+    }
   else
     {
-      if (error)
-        fpi_ssm_mark_failed (transfer->ssm, error);
-      else
-        fpi_ssm_mark_failed (transfer->ssm,
-                             fpi_device_error_new (FP_DEVICE_ERROR_PROTO));
+      fpi_ssm_mark_failed (transfer->ssm, error);
     }
 }
 
