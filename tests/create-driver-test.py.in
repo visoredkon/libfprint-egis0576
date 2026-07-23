@@ -3,9 +3,10 @@
 BUILDDIR='@BUILDDIR@'
 SRCDIR='@SRCDIR@'
 
+import signal
+import argparse
 import os
 import sys
-import signal
 library_path = BUILDDIR + '/libfprint/'
 
 # Relaunch ourselves with a changed environment so
@@ -27,35 +28,31 @@ from gi.repository import FPrint
 gi.require_version('GUsb', '1.0')
 from gi.repository import GUsb
 
-import re
 import shutil
 import subprocess
 import tempfile
 import time
 
-def print_usage():
-    print(f'Usage: {sys.argv[0]} driver [test-variant-name]')
-    print('A test variant name is optional, and must be all lower case letters, or dashes, with no spaces')
-    print(f'The captured data will be stored in {SRCDIR}/tests/[driver name]-[test variant name]')
-    print(f'Create custom.py prior to execution for non image device tests.')
+def test_variant(value):
+    if (not value or any(not (char.islower() or char == '-') for char in value) or
+        value.startswith('-') or value.endswith('-')):
+        raise argparse.ArgumentTypeError(
+            'must contain only lowercase letters and dashes')
+    return value
 
-if len(sys.argv) > 3:
-    print_usage()
-    sys.exit(1)
+parser = argparse.ArgumentParser(
+    description='Capture USB traffic for a libfprint driver test.')
+parser.add_argument('driver')
+parser.add_argument('variant', nargs='?', type=test_variant,
+                    help='Optional, lowercase test variant name')
+parser.add_argument('--test', choices=('capture', 'custom'),
+                    help='Run only the selected test (default: run both)')
+options = parser.parse_args()
 
-driver_name = sys.argv[1]
+driver_name = options.driver
 os.environ['FP_DRIVERS_ALLOWLIST'] = driver_name
 
-test_variant = None
-if len(sys.argv) == 3:
-    valid_re = re.compile('[a-z-]*')
-    test_variant = sys.argv[2]
-    if (not valid_re.match(test_variant) or
-        test_variant.startswith('-') or
-        test_variant.endswith('-')):
-        print(f'Invalid variant name {test_variant}\n')
-        print_usage()
-        sys.exit(1)
+test_variant = options.variant
 
 # Check that running as root
 
@@ -94,6 +91,9 @@ print(f'### Detected USB device /dev/bus/usb/{bus_num:03d}/{device_num:03d}')
 
 test_dir = SRCDIR + '/tests/' + test_name
 os.makedirs(test_dir, mode=0o775, exist_ok=True)
+custom_script = os.path.join(test_dir, 'custom.py')
+if options.test == 'custom' and not os.path.exists(custom_script):
+    parser.error(f'custom test script does not exist: {custom_script}')
 
 # Capture device info
 
@@ -168,12 +168,12 @@ def t_waitpid(pid, timeout):
 
     return r
 
-capture_test([SRCDIR + '/tests/capture.py', test_dir + '/capture.png'],
-             'capture.pcapng',
-             '### Capturing fingerprint, please swipe or press your finger on the reader')
+if options.test in (None, 'capture'):
+    capture_test([SRCDIR + '/tests/capture.py', test_dir + '/capture.png'],
+                 'capture.pcapng',
+                 '### Capturing fingerprint, please swipe or press your finger on the reader')
 
-custom_script = os.path.join(test_dir, 'custom.py')
-if os.path.exists(custom_script):
+if options.test in (None, 'custom') and os.path.exists(custom_script):
     capture_test([custom_script], 'custom.pcapng',
                  '### Running the custom fingerprint capture')
 
