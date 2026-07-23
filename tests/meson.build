@@ -35,6 +35,7 @@ installed_tests_libdir = libdir
 
 drivers_tests = {
     'aes2501': { 'timeout': 20 },
+    'aes2550': {},
     'aes3500': {},
     'elan': {},
     'elan-cobo': {},
