@@ -201,26 +201,48 @@ if get_option('introspection')
 
         if (driver_name in supported_drivers and
             gusb_dep.version().version_compare('>= 0.3.0'))
-            driver_tests_enabled = true
-            test(driver_test,
-                python3,
-                args: [
-                    umockdev_test.full_path(),
-                    meson.current_source_dir() / driver_test,
-                ],
-                env: driver_envs,
-                is_parallel: args.get('is_parallel', true),
-                priority: args.get('priority', 0),
-                protocol: args.get('protocol', 'exitcode'),
-                should_fail: args.get('should_fail', false),
-                suite: ['drivers'] + args.get('suite', []),
-                timeout: args.get('timeout', 15),
-                verbose: args.get('verbose', false),
-                depends: [
-                    libfprint_typelib,
-                    test_emulation_lib,
-                ],
-            )
+
+            test_types = []
+            foreach test_type: args.get('test_types', ['custom', 'capture'])
+                test_file_prefix = meson.current_source_dir() / driver_test / test_type
+                if fs.exists(test_file_prefix + '.py')
+                    test_types += [test_type]
+                elif fs.exists(test_file_prefix + '.png')
+                    test_types += [test_type]
+                elif fs.exists(test_file_prefix + '.ioctl')
+                    test_types += [test_type]
+                elif fs.exists(test_file_prefix + '.pcapng')
+                    test_types += [test_type]
+                endif
+            endforeach
+
+            assert(test_types.length() > 0,
+                'No test types found for driver ' + driver_test)
+
+            foreach test_type: test_types
+                driver_tests_enabled = true
+                test_name = driver_test + (test_types.length() > 1 ? '-' + test_type : '')
+                test(test_name,
+                    python3,
+                    args: [
+                        umockdev_test.full_path(),
+                        meson.current_source_dir() / driver_test,
+                        '--test', test_type,
+                    ],
+                    env: driver_envs,
+                    is_parallel: args.get('is_parallel', true),
+                    priority: args.get('priority', 0),
+                    protocol: args.get('protocol', 'exitcode'),
+                    should_fail: args.get('should_fail', false),
+                    suite: ['drivers', test_type] + args.get('suite', []),
+                    timeout: args.get('timeout', 15),
+                    verbose: args.get('verbose', false),
+                    depends: [
+                        libfprint_typelib,
+                        test_emulation_lib,
+                    ],
+                )
+            endforeach
 
             if installed_tests
                 driver_envs_str = run_command(python3, '-c', env_parser_cmd,
