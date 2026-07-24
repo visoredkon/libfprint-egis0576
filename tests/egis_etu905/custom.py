@@ -108,6 +108,23 @@ def identify_cancelled_cb(dev, res):
         print(f"Identify cancelled with error: {e}")
 
 d.identify(deserialized_prints, cancellable=cancellable, callback=identify_cancelled_cb)
+
+print("--- IDENTIFY STARTED, CANCELLING IMMEDIATELY ---")
+cancellable.cancel()
+
+while not identify_cancelled:
+    ctx.iteration(True)
+print(f"--- CANCELLATION TEST DONE, result: {cancel_result} ---")
+
+cancellable = Gio.Cancellable()
+identify_cancelled = False
+cancel_result = None
+d.identify(deserialized_prints, cancellable=cancellable, callback=identify_cancelled_cb)
+
+# Wait until the device is actually waiting for a finger before cancelling.
+print("Waiting for device to reach wait-for-finger stage before cancelling...")
+while not (d.get_finger_status() & FPrint.FingerStatusFlags.NEEDED):
+    ctx.iteration(True)
 cancellable.cancel()
 
 while not identify_cancelled:
