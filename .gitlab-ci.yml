@@ -90,7 +90,8 @@ test:
   script:
     - meson setup _build --werror -Ddrivers=all -Db_coverage=true
     - meson test -C _build --print-errorlogs --no-stdsplit --timeout-multiplier 3
-    - meson compile -C _build coverage || true
+    # We can't use `meson compile` https://github.com/mesonbuild/meson/issues/7895
+    - ninja -C _build coverage
     - cat _build/meson-logs/coverage.txt || true
   artifacts:
     reports:
