@@ -301,7 +301,8 @@ libfprint_private_dep = declare_dependency(
     ]
 )
 
-udev_hwdb_list_file = files('fprint-list-udev-hwdb.c')
+udev_hwdb_list = 'fprint-list-udev-hwdb.c'
+udev_hwdb_list_file = files(udev_hwdb_list)
 udev_hwdb = executable('fprint-list-udev-hwdb',
     udev_hwdb_list_file,
     dependencies: libfprint_private_dep,
@@ -354,8 +355,13 @@ if install_udev_rules
     )
 endif
 
+udev_hwdb_list_updater = custom_target('udev-hwdb-list-updater',
+    output: udev_hwdb_list,
+    command: [ sync_unsupported_files, udev_hwdb_list_file ],
+)
+
 run_target('sync-udev-hwdb',
-    depends: udev_hwdb_generator,
+    depends: udev_hwdb_list_updater,
     command: [
         'cp', '-v',
         udev_hwdb_generator.full_path(),
@@ -363,9 +369,7 @@ run_target('sync-udev-hwdb',
     ]
 )
 
-run_target('sync-unsupported-devices',
-    command: [ sync_unsupported_files, udev_hwdb_list_file ]
-)
+alias_target('sync-unsupported-devices', udev_hwdb_list_updater)
 
 supported_devices = executable('fprint-list-supported-devices',
     'fprint-list-supported-devices.c',
