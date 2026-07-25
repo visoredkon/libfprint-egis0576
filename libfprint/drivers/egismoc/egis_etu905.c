@@ -199,19 +199,26 @@ egis_etu905_task_ssm_done (FpiSsm   *ssm,
 {
   g_autoptr(GError) task_error = g_steal_pointer (&error);
   FpiDeviceEgisEtu905 *self = FPI_DEVICE_EGIS_ETU905 (device);
+  gboolean is_cancellation;
 
   fp_dbg ("Task SSM done");
 
   /* task_ssm is going to be freed by completion of SSM */
   g_assert (!self->task_ssm || self->task_ssm == ssm);
-  self->task_ssm = NULL;
 
+  /* Check if this is a cancellation before clearing task_ssm, so we can
+   * distinguish between "identify completed normally" and "identify was
+   * cancelled". The identify_cancel_ssm_done callback needs to know this
+   * to report the correct result. */
+  is_cancellation = egis_etu905_maybe_cancel (device, task_error);
+
+  self->task_ssm = NULL;
   g_clear_pointer (&self->enrolled_ids, g_ptr_array_unref);
 
   /* On cancellation we need to send the device-side cancel command before
    * reporting the error, as the idle ->cancel vfunc may not be called due
    * to the operation already being completed by the cancellable abort. */
-  if (egis_etu905_maybe_cancel (device, task_error))
+  if (is_cancellation)
     return;
 
   if (task_error)
@@ -1343,7 +1350,35 @@ egis_etu905_identify_cancel_ssm_done (FpiSsm   *ssm,
 
   self->identify_cancel_ssm = NULL;
 
-  egis_etu905_cancel_cb (device, NULL, 0, error);
+  if (error)
+    {
+      g_warning ("Cancel command failed: %s", error->message);
+      g_clear_error (&error);
+    }
+
+  /* The cancel flow is triggered in two scenarios:
+   * 1. Identify was cancelled before completion (task_ssm failed with
+   *    G_IO_ERROR_CANCELLED). We need to report the cancel error.
+   * 2. Identify completed normally but was cancelled just as it finished
+   *    (task_ssm completed, fpi_device_identify_complete was already called
+   *    in IDENTIFY_COMPLETE state). We just need to clean up.
+   *
+   * We distinguish these by checking if the action is still cancelled.
+   * If fpi_device_action_is_cancelled returns TRUE, the identify was
+   * cancelled and we need to report the error. Otherwise, identify
+   * completed successfully and we just complete the action. */
+  if (fpi_device_action_is_cancelled (device))
+    {
+      fp_dbg ("Cancel completed, reporting cancel error");
+      error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                                   "Operation was cancelled");
+      fpi_device_action_error (device, g_steal_pointer (&error));
+    }
+  else
+    {
+      fp_dbg ("Cancel completed after identify done, completing identify action");
+      fpi_device_identify_complete (device, NULL);
+    }
 }
 
 static void
@@ -1479,9 +1514,15 @@ egis_etu905_identify_run_state (FpiSsm   *ssm,
      * this extra step unnecessary and just skip it in this driver. This driver
      * will instead handle matching of the FpPrint from the gallery in the
      * callback egis_etu905_identify_check_cb.
+     *
+     * If the operation was cancelled, we don't complete the identify action
+     * here. Instead, we let the cancel flow (triggered by task_ssm_done)
+     * complete first, and it will call fpi_device_identify_complete when done.
+     * This ensures the device stays open until the cancel flow completes.
      */
     case IDENTIFY_COMPLETE:
-      fpi_device_identify_complete (device, NULL);
+      if (!fpi_device_action_is_cancelled (device))
+        fpi_device_identify_complete (device, NULL);
 
       fpi_ssm_mark_completed (ssm);
       break;
@@ -1750,6 +1791,10 @@ egis_etu905_cancel_cb (FpDevice *device,
       g_clear_error (&error);
     }
 
+  /* This callback is only used for enroll cancellation.
+   * Identify cancellation uses egis_etu905_identify_cancel_ssm_done instead.
+   * We must always call fpi_device_action_error here to complete the enroll
+   * action, even if the task_ssm has already been freed. */
   error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED,
                                "Operation was cancelled");
 
@@ -1760,6 +1805,7 @@ static void
 egis_etu905_cancel (FpDevice *device)
 {
   FpiDeviceAction action = fpi_device_get_current_action (device);
+  FpiDeviceEgisEtu905 *self = FPI_DEVICE_EGIS_ETU905 (device);
 
   fp_dbg ("Cancelling action %d", action);
 
@@ -1768,7 +1814,12 @@ egis_etu905_cancel (FpDevice *device)
    * already cancelled (it aborted the in-flight operation transfer), so we
    * must not bind these commands to it or they would never be sent.
    * Cancellation is effectively non-cancellable; the commands are allowed to
-   * fail (no callback), the device is reset by the next operation anyway. */
+   * fail (no callback), the device is reset by the next operation anyway.
+   *
+   * Note: Even if task_ssm is NULL (operation already completed), we still
+   * need to execute the cancel commands to trigger firmware template update
+   * and device cleanup. The egis_etu905_cancel_cb will check task_ssm and
+   * avoid calling fpi_device_action_error if the action already completed. */
   if (action == FPI_DEVICE_ACTION_ENROLL)
     {
       egis_etu905_exec_cmd_full (device,
@@ -1779,8 +1830,6 @@ egis_etu905_cancel (FpDevice *device)
     }
   else if (action == FPI_DEVICE_ACTION_IDENTIFY)
     {
-      FpiDeviceEgisEtu905 *self = FPI_DEVICE_EGIS_ETU905 (device);
-
       g_assert (self->identify_cancel_ssm == NULL);
 
       self->identify_cancel_ssm = fpi_ssm_new (device,

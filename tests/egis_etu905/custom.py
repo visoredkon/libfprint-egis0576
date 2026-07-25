@@ -78,7 +78,8 @@ identified = False
 deserialized_prints = []
 for sp in stored:
     deserialized_prints.append(FPrint.Print.deserialize(sp.serialize()))
-    assert deserialized_prints[-1].equal(p)
+# The last stored print should be the newly enrolled one
+assert deserialized_prints[-1].equal(p)
 
 d.identify(deserialized_prints, callback=identify_done)
 del deserialized_prints
@@ -107,6 +108,7 @@ def identify_cancelled_cb(dev, res):
         cancel_result = e
         print(f"Identify cancelled with error: {e}")
 
+# Test 1: Cancel immediately after starting identify
 d.identify(deserialized_prints, cancellable=cancellable, callback=identify_cancelled_cb)
 
 print("--- IDENTIFY STARTED, CANCELLING IMMEDIATELY ---")
@@ -116,6 +118,13 @@ while not identify_cancelled:
     ctx.iteration(True)
 print(f"--- CANCELLATION TEST DONE, result: {cancel_result} ---")
 
+# Reopen device to ensure clean state for next cancel test
+print("--- REOPENING DEVICE BEFORE NEXT CANCEL TEST ---")
+d.close_sync()
+d.open_sync()
+print("--- DEVICE REOPENED ---")
+
+# Test 2: Cancel after device reaches wait-for-finger stage
 cancellable = Gio.Cancellable()
 identify_cancelled = False
 cancel_result = None
