@@ -1,6 +1,30 @@
 This file lists notable changes in each release. For the full history of all
 changes, see ChangeLog.
 
+2026-07-25: v1.94.100 release
+
+Highlights:
+  * bump meson dependency to 0.62
+  * egis_etu905: New driver supporting PIDs 0x05AE and 0x9201
+  * synaptics: New PIDs 0x010D, 0x010E and 0x01A4
+  * goodixmoc: Support 27c6:6382, 27c6:6984 and 27c6:6090
+  * nb1010: Support the NB-2020-U fingerprint reader
+  * focaltech_moc: New PID 0xA97A
+  * elanmoc: New PID 0x0CB2
+  * fpcmoc: New PID 0x9B24
+  * aes2550: Handle tapping without swiping and fix deactivation after errors
+  * fp-device: Implement verify using identification, improving driver
+    consistency and reducing duplicated driver code
+  * fpcmoc, egis_etu905, elan, elanspi, goodixmoc and mafpmoc: Improve
+    big-endian support
+  * goodixmoc: Fix malformed payload, CRC and invalid finger handling
+  * synaptics, realtek, vfs101, vfs301, upekts, elan and egismoc: Fix
+    memory safety, bounds checking and error handling issues
+  * aes1610, aes2510, aesx660, fpcmoc and uru4000: Fix resource leaks and
+    cancellation or device deactivation issues
+  * Expanded USB replay coverage for aes2550 and egis_etu905, and improved
+    virtual-image testing with transformed fingerprint images
+
 2026-02-10: v1.94.10 release
 
 Highlights:
