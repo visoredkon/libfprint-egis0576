@@ -44,6 +44,8 @@ log_transfer (FpiUsbTransfer *transfer, gboolean submit, GError *error)
 {
   if (fpi_log_is_debug_transfer_enabled ())
     {
+      gboolean is_incoming = !!(transfer->endpoint & FPI_USB_ENDPOINT_IN);
+
       if (!submit)
         {
           g_autofree gchar *error_str = NULL;
@@ -67,11 +69,13 @@ log_transfer (FpiUsbTransfer *transfer, gboolean submit, GError *error)
                    transfer->endpoint);
         }
 
-      if (!submit == !!(transfer->endpoint & FPI_USB_ENDPOINT_IN))
+      if (submit != is_incoming)
         {
-          fp_dbg_hex_dump_data (transfer->buffer,
-                                (transfer->endpoint & FPI_USB_ENDPOINT_IN) ?
-                                transfer->actual_length : transfer->length);
+          gsize dump_length = is_incoming ? transfer->actual_length : transfer->length;
+
+          /* Skip hex dump if actual_length is invalid (e.g., -1 on cancelled IN transfers) */
+          if (dump_length <= transfer->length)
+            fp_dbg_hex_dump_data (transfer->buffer, dump_length);
         }
     }
 }

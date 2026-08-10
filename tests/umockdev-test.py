@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 
-import sys
+import argparse
 import os
 import os.path
 import glob
 import shutil
+import sys
 import tempfile
 import subprocess
 
-if len(sys.argv) != 2:
-    print("You need to specify exactly one argument, the directory with test data")
+parser = argparse.ArgumentParser(
+    description='Run libfprint tests using umockdev data.')
+parser.add_argument('test_dir', help='Directory containing test data')
+parser.add_argument('--test', choices=('capture', 'custom'),
+                    help='Run only the selected test (default: run both)')
+options = parser.parse_args()
 
 # Check that umockdev is available
 try:
@@ -27,11 +32,17 @@ except FileNotFoundError:
     sys.exit(77)
 
 edir = os.path.dirname(sys.argv[0])
-ddir = sys.argv[1]
+ddir = options.test_dir
+assert os.path.isdir(ddir)
+
+capture_available = bool(glob.glob(os.path.join(ddir, 'capture.*')))
+custom_available = bool(glob.glob(os.path.join(ddir, 'custom.*')))
+if options.test == 'capture' and not capture_available:
+    parser.error(f'capture test data does not exist in {ddir}')
+if options.test == 'custom' and not custom_available:
+    parser.error(f'custom test data does not exist in {ddir}')
 
 tmpdir = tempfile.mkdtemp(prefix='libfprint-umockdev-test-')
-
-assert os.path.isdir(ddir)
 
 def cmp_pngs(png_a, png_b):
     print("Comparing PNGs %s and %s" % (png_a, png_b))
@@ -111,10 +122,10 @@ def custom():
                           ['%s' % os.path.join(ddir, "custom.py")])
 
 try:
-    if glob.glob(os.path.join(ddir, "capture.*")):
+    if options.test in (None, 'capture') and capture_available:
         capture()
 
-    if glob.glob(os.path.join(ddir, "custom.*")):
+    if options.test in (None, 'custom') and custom_available:
         custom()
 
 except Exception as e:

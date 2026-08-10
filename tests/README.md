@@ -14,9 +14,9 @@ script, capture it and store the capture to `custom.pcapng`.
 'capture' and 'custom' Test Creation
 ------------------------------------
 
-For image devices the `capture.py` script will be used to capture one reference
-image. If the driver is a non-image driver, then a `custom.py` script should be
-created in advance, which will be run instead.
+For image devices, use the `capture` test to capture one reference image. For
+non-image drivers, create a `custom.py` script in advance and select the
+`custom` test instead.
 
 1. Make sure that libfprint is built with support for the device driver
    that you want to create a test case for.
@@ -26,8 +26,11 @@ created in advance, which will be run instead.
    but the hardware is slightly different, you might want to pass a variant
    name as a command-line options, for example:
 ```sh
-$ sudo tests/create-driver-test.py driver [variant]
+$ sudo tests/create-driver-test.py [--test capture|custom] driver [variant]
 ```
+
+By default, the tool runs `capture.py` and, when present, the test directory's
+`custom.py`. Use `--test capture` or `--test custom` to record only that test.
 
 3. If the capture is not successful, run the tool again to start another capture.
 

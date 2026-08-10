@@ -68,8 +68,12 @@ error_to_string (GError * error)
     domain_str = g_enum_to_string (FP_TYPE_DEVICE_ERROR, error->code);
   else if (error->domain == G_IO_ERROR)
     domain_str = g_enum_to_string (g_io_error_enum_get_type (), error->code);
+  else if (error->domain == G_USB_DEVICE_ERROR)
+    domain_str = g_strdup_printf ("G_USB_DEVICE_ERROR_%u", error->code);
   else
-    domain_str = g_strdup_printf ("UNKNOWN_ERROR_%u", error->domain);
+    domain_str = g_strdup_printf ("%s_%u",
+                                  g_quark_to_string (error->domain),
+                                  error->code);
 
   return g_strdup_printf ("[%s] %s", domain_str, error->message);
 }

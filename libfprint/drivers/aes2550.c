@@ -57,6 +57,7 @@ struct _FpiDeviceAes2550
 
   GSList       *strips;
   size_t        strips_len;
+  gboolean      active;
   gboolean      deactivating;
   int           heartbeat_cnt;
 };
@@ -91,11 +92,21 @@ finger_det_data_cb (FpiUsbTransfer *transfer, FpDevice *device,
                     gpointer user_data, GError *error)
 {
   FpImageDevice *dev = FP_IMAGE_DEVICE (device);
+  FpiDeviceAes2550 *self = FPI_DEVICE_AES2550 (device);
   unsigned char *data = transfer->buffer;
 
   if (error)
     {
-      fpi_image_device_session_error (FP_IMAGE_DEVICE (device), error);
+      /* The finger-detect loop is broken; it no longer has a pending
+       * operation. Clear the active flag so that the deactivation
+       * triggered by the session error (or an in-flight cancellation)
+       * can complete. */
+      self->active = FALSE;
+
+      if (self->deactivating)
+        complete_deactivation (dev);
+      else
+        fpi_image_device_session_error (dev, error);
       return;
     }
 
@@ -122,10 +133,20 @@ finger_det_reqs_cb (FpiUsbTransfer *t, FpDevice *device,
 {
   FpiUsbTransfer *transfer;
   FpImageDevice *dev = FP_IMAGE_DEVICE (device);
+  FpiDeviceAes2550 *self = FPI_DEVICE_AES2550 (device);
 
   if (error)
     {
-      fpi_image_device_session_error (dev, error);
+      /* The finger-detect loop is broken; it no longer has a pending
+       * operation. Clear the active flag so that the deactivation
+       * triggered by the session error (or an in-flight cancellation)
+       * can complete. */
+      self->active = FALSE;
+
+      if (self->deactivating)
+        complete_deactivation (dev);
+      else
+        fpi_image_device_session_error (dev, error);
       return;
     }
 
@@ -239,13 +260,19 @@ capture_set_idle_reqs_cb (FpiUsbTransfer *transfer,
       /* marking machine complete will re-trigger finger detection loop */
       fpi_ssm_mark_completed (transfer->ssm);
     }
+  else if (!error)
+    {
+      /* No image frames were captured (e.g. user tapped without swiping).
+       * Such case is quite easy to happen, since Super RSR is enabled and
+       * thus "Slices with 0-3 pixels of Y motion are discarded" according
+       * to the design specification manual. */
+      fpi_image_device_retry_scan (dev, FP_DEVICE_RETRY_TOO_SHORT);
+      fpi_image_device_report_finger_status (dev, FALSE);
+      fpi_ssm_mark_completed (transfer->ssm);
+    }
   else
     {
-      if (error)
-        fpi_ssm_mark_failed (transfer->ssm, error);
-      else
-        fpi_ssm_mark_failed (transfer->ssm,
-                             fpi_device_error_new (FP_DEVICE_ERROR_PROTO));
+      fpi_ssm_mark_failed (transfer->ssm, error);
     }
 }
 
@@ -371,6 +398,11 @@ capture_sm_complete (FpiSsm *ssm, FpDevice *_dev, GError *error)
     }
   else if (error)
     {
+      /* The capture SSM has terminated, so no completion handler is left
+       * to observe the deactivation that the session error triggers.
+       * Clear the active flag so dev_deactivate() completes it directly.
+       */
+      self->active = FALSE;
       fpi_image_device_session_error (dev, error);
     }
   else
@@ -489,12 +521,16 @@ activate_run_state (FpiSsm *ssm, FpDevice *dev)
 static void
 activate_sm_complete (FpiSsm *ssm, FpDevice *_dev, GError *error)
 {
+  FpiDeviceAes2550 *self = FPI_DEVICE_AES2550 (_dev);
   FpImageDevice *dev = FP_IMAGE_DEVICE (_dev);
 
   fpi_image_device_activate_complete (dev, error);
 
   if (!error)
-    start_finger_detection (dev);
+    {
+      self->active = TRUE;
+      start_finger_detection (dev);
+    }
 }
 
 static void
@@ -511,6 +547,13 @@ dev_deactivate (FpImageDevice *dev)
 {
   FpiDeviceAes2550 *self = FPI_DEVICE_AES2550 (dev);
 
+  if (!self->active)
+    {
+      /* No operation is pending, so complete it right away. */
+      complete_deactivation (dev);
+      return;
+    }
+
   self->deactivating = TRUE;
 }
 
@@ -522,6 +565,7 @@ complete_deactivation (FpImageDevice *dev)
   G_DEBUG_HERE ();
 
   self->deactivating = FALSE;
+  self->active = FALSE;
   g_slist_free (self->strips);
   self->strips = NULL;
   self->strips_len = 0;
